@@ -20,6 +20,7 @@ EMBEDDING_DIM = 1536
 POINT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "logimind.chunks")
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 2.0
+UPSERT_BATCH_SIZE = 200
 
 SQLITE_PATH = Path(__file__).resolve().parents[2] / "data" / "metadata.db"
 
@@ -59,15 +60,25 @@ class QdrantStore:
             logger.info("Created Qdrant collection %s", COLLECTION_NAME)
 
     def upsert(self, points: list[PointStruct]) -> None:
-        """Upsert points into the collection, retrying transient failures.
+        """Upsert points into the collection in batches, retrying transient
+        failures within each batch.
+
+        Points are sent in batches of UPSERT_BATCH_SIZE rather than all at
+        once, since Qdrant's REST API rejects request payloads over 32MB.
 
         Args:
             points: Points to upsert.
 
         Raises:
-            qdrant_client.http.exceptions.ApiException: If the upsert fails
+            qdrant_client.http.exceptions.ApiException: If a batch fails
                 after all retries.
         """
+        for start in range(0, len(points), UPSERT_BATCH_SIZE):
+            batch = points[start : start + UPSERT_BATCH_SIZE]
+            self._upsert_batch(batch)
+
+    def _upsert_batch(self, points: list[PointStruct]) -> None:
+        """Upsert a single batch of points, retrying transient failures."""
         last_error: ApiException | None = None
         for attempt in range(MAX_RETRIES):
             try:

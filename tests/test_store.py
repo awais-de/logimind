@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.models import PointStruct
 
 from data.ingestion.chunker import Chunk
 from data.ingestion.embedder import EmbeddedChunk
@@ -63,6 +64,9 @@ def test_qdrant_store_ensure_collection_skips_when_present() -> None:
     store._client.create_collection.assert_not_called()
 
 
+_DUMMY_POINT = PointStruct(id=1, vector=[0.1], payload={})
+
+
 def test_qdrant_store_upsert_retries_then_succeeds() -> None:
     store = _make_store()
     error = UnexpectedResponse(
@@ -71,7 +75,7 @@ def test_qdrant_store_upsert_retries_then_succeeds() -> None:
     store._client.upsert = Mock(side_effect=[error, None])
 
     with patch("data.ingestion.store.time.sleep"):
-        store.upsert([])
+        store.upsert([_DUMMY_POINT])
 
     assert store._client.upsert.call_count == 2
 
@@ -84,7 +88,17 @@ def test_qdrant_store_upsert_raises_after_max_retries() -> None:
     store._client.upsert = Mock(side_effect=error)
 
     with patch("data.ingestion.store.time.sleep"), pytest.raises(UnexpectedResponse):
-        store.upsert([])
+        store.upsert([_DUMMY_POINT])
+
+    assert store._client.upsert.call_count == 3
+
+
+def test_qdrant_store_upsert_batches_large_point_lists() -> None:
+    store = _make_store()
+    store._client.upsert = Mock()
+    points = [PointStruct(id=i, vector=[0.1], payload={}) for i in range(450)]
+
+    store.upsert(points)
 
     assert store._client.upsert.call_count == 3
 
