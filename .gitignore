@@ -1,0 +1,23 @@
+# LLM-assisted working docs — never committed to this portfolio repo
+CLAUDE.md
+/llm-notes/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Data
+data/raw/
+
+# OS
+.DS_Store
