@@ -18,6 +18,7 @@ venv/
 
 # Data
 data/raw/
+data/metadata.db
 
 # OS
 .DS_Store
