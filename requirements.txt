@@ -9,3 +9,5 @@ sentence-transformers
 autogen-agentchat
 autogen-ext[anthropic]
 langsmith
+fastapi
+uvicorn
