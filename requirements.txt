@@ -5,3 +5,4 @@ openai
 qdrant-client
 python-dotenv
 bm25s
+sentence-transformers
