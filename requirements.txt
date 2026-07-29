@@ -8,6 +8,7 @@ bm25s
 sentence-transformers
 autogen-agentchat
 autogen-ext[anthropic]
+tiktoken
 langsmith
 fastapi
 uvicorn
