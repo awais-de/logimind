@@ -11,3 +11,4 @@ autogen-ext[anthropic]
 langsmith
 fastapi
 uvicorn
+streamlit

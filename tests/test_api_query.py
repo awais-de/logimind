@@ -42,3 +42,13 @@ async def test_query_endpoint_requires_question_field() -> None:
         response = await client.post("/query", json={})
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_returns_ok() -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
