@@ -6,3 +6,5 @@ qdrant-client
 python-dotenv
 bm25s
 sentence-transformers
+autogen-agentchat
+autogen-ext[anthropic]
