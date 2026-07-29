@@ -5,8 +5,11 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from agents.orchestrator import Orchestrator
+from api.rate_limit import limiter
 from api.routes.query import router as query_router
 
 load_dotenv()
@@ -24,6 +27,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LogiMind", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(query_router)
 
 

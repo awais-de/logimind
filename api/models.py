@@ -1,20 +1,22 @@
 """Pydantic request/response models for the /query API endpoint."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agents.orchestrator import OrchestratorResult
 
 SNIPPET_LENGTH = 200
+MAX_QUESTION_LENGTH = 500
 
 
 class QueryRequest(BaseModel):
     """A user's question sent to the /query endpoint.
 
     Attributes:
-        question: The user's natural-language question.
+        question: The user's natural-language question. Length-capped
+            since each request spends real OpenAI/Anthropic API budget.
     """
 
-    question: str
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
 
 
 class Citation(BaseModel):

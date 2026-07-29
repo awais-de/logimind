@@ -13,3 +13,4 @@ langsmith
 fastapi
 uvicorn
 streamlit
+slowapi
