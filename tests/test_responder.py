@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from autogen_agentchat.agents import AssistantAgent
+from autogen_core.models import RequestUsage
 
 from agents.model_client import build_claude_client
 from agents.responder import _format_context, build_responder_agent, run_responder
@@ -61,9 +62,10 @@ def test_format_context_handles_empty_retrieval() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_responder_returns_agent_text() -> None:
+async def test_run_responder_returns_agent_text_and_usage() -> None:
     fake_message = Mock()
     fake_message.content = "Prohibited items include batteries (Prohibited Items Guide, p.1)."
+    fake_message.models_usage = RequestUsage(prompt_tokens=300, completion_tokens=80)
     fake_result = Mock()
     fake_result.messages = [fake_message]
 
@@ -71,9 +73,11 @@ async def test_run_responder_returns_agent_text() -> None:
     fake_agent.run = AsyncMock(return_value=fake_result)
 
     retrieval = RetrievalResult(search_results=[_result("c1", "batteries are prohibited")])
-    answer = await run_responder(fake_agent, "what's prohibited?", retrieval)
+    answer, usage = await run_responder(fake_agent, "what's prohibited?", retrieval)
 
     fake_agent.run.assert_awaited_once()
     called_context = fake_agent.run.call_args.kwargs["task"]
     assert "what's prohibited?" in called_context
     assert answer == "Prohibited items include batteries (Prohibited Items Guide, p.1)."
+    assert usage.prompt_tokens == 300
+    assert usage.completion_tokens == 80

@@ -18,6 +18,7 @@ venv/
 
 # Data
 data/raw/
+monitoring/metrics.db
 
 # OS
 .DS_Store

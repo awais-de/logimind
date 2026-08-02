@@ -3,7 +3,7 @@
 import logging
 
 from autogen_agentchat.agents import AssistantAgent
-from autogen_core.models import ChatCompletionClient
+from autogen_core.models import ChatCompletionClient, RequestUsage
 
 from agents.retriever import RetrievalResult
 from monitoring.prompt_versions.responder import RESPONDER_SYSTEM_PROMPT_V1
@@ -51,7 +51,9 @@ def _format_context(question: str, retrieval: RetrievalResult) -> str:
     return "\n".join(parts)
 
 
-async def run_responder(agent: AssistantAgent, question: str, retrieval: RetrievalResult) -> str:
+async def run_responder(
+    agent: AssistantAgent, question: str, retrieval: RetrievalResult
+) -> tuple[str, RequestUsage | None]:
     """Run the ResponseAgent to synthesize a final answer.
 
     Args:
@@ -60,8 +62,11 @@ async def run_responder(agent: AssistantAgent, question: str, retrieval: Retriev
         retrieval: What RetrieverAgent found for the question.
 
     Returns:
-        The synthesized answer text, with citations.
+        A tuple of the synthesized answer text (with citations) and the
+        model's token usage for this call (None if unreported), for cost
+        tracking.
     """
     context = _format_context(question, retrieval)
     result = await agent.run(task=context)
-    return result.messages[-1].content
+    last_message = result.messages[-1]
+    return last_message.content, last_message.models_usage

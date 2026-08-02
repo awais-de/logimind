@@ -3,7 +3,7 @@
 import re
 
 from autogen_agentchat.agents import AssistantAgent
-from autogen_core.models import ChatCompletionClient
+from autogen_core.models import ChatCompletionClient, RequestUsage
 from pydantic import BaseModel, ValidationError
 
 from monitoring.prompt_versions.planner import PLANNER_SYSTEM_PROMPT_V1
@@ -75,7 +75,7 @@ def parse_plan(raw_text: str) -> Plan:
         raise ValueError(f"Planner response did not match Plan schema: {raw_text!r}") from exc
 
 
-async def run_planner(agent: AssistantAgent, message: str) -> Plan:
+async def run_planner(agent: AssistantAgent, message: str) -> tuple[Plan, RequestUsage | None]:
     """Run the PlannerAgent on a user message and parse its Plan.
 
     Args:
@@ -83,7 +83,9 @@ async def run_planner(agent: AssistantAgent, message: str) -> Plan:
         message: The user's message.
 
     Returns:
-        The parsed Plan.
+        A tuple of the parsed Plan and the model's token usage for this
+        call (None if the client didn't report it), for cost tracking.
     """
     result = await agent.run(task=message)
-    return parse_plan(result.messages[-1].content)
+    last_message = result.messages[-1]
+    return parse_plan(last_message.content), last_message.models_usage
