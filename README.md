@@ -52,13 +52,19 @@ flowchart LR
 - LangSmith traces every step of the pipeline.
 - `/query` is rate-limited (10/minute per client IP, proxy-aware) and caps question length, since every call spends real OpenAI/Anthropic budget.
 
+### Monitoring and evaluation
+
+- Every pipeline step (planner, retriever, responder) is timed and, for the two Claude-backed steps, billed by real token usage from AutoGen's `models_usage`, then written to SQLite. Retriever has no model cost since it's deterministic dispatch, not an LLM call — recorded as such rather than faked.
+- Every live query also logs its question, answer, and retrieved context to SQLite at no extra API cost. A separate, deliberately-invoked eval loop samples unscored queries and judges them for faithfulness (does the answer's claims hold up against the retrieved context) and answer relevancy (does the answer actually address the question), via direct OpenAI calls — a judge model decomposing/verifying claims for the former, generated-question embedding similarity for the latter.
+- This reimplements RAGAS's own metric definitions rather than depending on the `ragas` library: `ragas` only imports through an old LangChain chain that conflicts with the numpy version required elsewhere in the stack (sentence-transformers, scipy) and isn't reliably reproducible from a fresh install. Scoring logic ended up being about 30 lines against the OpenAI SDK directly, consistent with how the rest of this project avoids framework wrappers in favor of direct API calls.
+
 ### Deployment
 
 Two separate Docker images rather than one: the API image carries the full ML stack (CPU-only torch build, not the default CUDA one); the UI image only needs `httpx` and `streamlit`, since it's just an HTTP client to the API. Deployed as two services on Railway.
 
 ## Stack
 
-Python 3.12, Pydantic, PyMuPDF, OpenAI (embeddings), Anthropic Claude + AutoGen (agents), Qdrant, BM25s, sentence-transformers, FastAPI, Streamlit, LangSmith, pytest.
+Python 3.12, Pydantic, PyMuPDF, OpenAI (embeddings, evaluation judge), Anthropic Claude + AutoGen (agents), Qdrant, BM25s, sentence-transformers, FastAPI, Streamlit, LangSmith, pytest.
 
 ## Running it locally
 
@@ -76,8 +82,8 @@ Or with Docker: `docker compose up --build`.
 
 ## Testing
 
-`pytest` — 90 tests, all external calls mocked so the suite runs without hitting real APIs.
+`pytest` — 108 tests, all external calls mocked so the suite runs without hitting real APIs.
 
 ## Status
 
-Ingestion, retrieval, and the agent pipeline are done and deployed. Still open: a RAGAS evaluation harness for retrieval/answer quality, latency/cost tracking, and CI.
+Ingestion, hybrid retrieval, the agent pipeline, monitoring (latency/cost tracking, faithfulness/relevancy evaluation), API/UI, Docker, CI, and deployment are all done. Still open: a curated ground-truth test set for retrieval-only quality scoring (context precision/recall).
