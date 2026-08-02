@@ -15,6 +15,7 @@ from agents.model_client import DEFAULT_MODEL, build_claude_client
 from agents.planner import Plan, build_planner_agent, run_planner
 from agents.responder import build_responder_agent, run_responder
 from agents.retriever import RetrievalResult, run_retriever
+from monitoring.eval_loop import EVAL_DB_PATH, QuerySample, log_query_sample
 from monitoring.metrics import METRICS_DB_PATH, StepMetric, compute_cost, record_step
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ class Orchestrator:
         model_client: ChatCompletionClient | None = None,
         model: str = DEFAULT_MODEL,
         metrics_db_path: Path = METRICS_DB_PATH,
+        eval_db_path: Path = EVAL_DB_PATH,
     ) -> None:
         """Build the pipeline's agents.
 
@@ -62,10 +64,13 @@ class Orchestrator:
             model: Model ID used for cost attribution in recorded metrics.
                 Only meaningful when model_client is left as default.
             metrics_db_path: SQLite database step metrics are written to.
+            eval_db_path: SQLite database query samples are logged to, for
+                later RAGAS-style evaluation via monitoring/eval_loop.py.
         """
         self._model_client = model_client or build_claude_client(model=model)
         self._model = model
         self._metrics_db_path = metrics_db_path
+        self._eval_db_path = eval_db_path
         self._planner = build_planner_agent(self._model_client)
         self._responder = build_responder_agent(self._model_client)
 
@@ -94,6 +99,8 @@ class Orchestrator:
         answer, responder_usage = await run_responder(self._responder, question, retrieval)
         self._record_step(query_id, "responder", start, responder_usage)
 
+        self._log_query_sample(query_id, question, answer, retrieval)
+
         return OrchestratorResult(question=question, plan=plan, retrieval=retrieval, answer=answer)
 
     def _record_step(
@@ -121,6 +128,25 @@ class Orchestrator:
             record_step(metric, db_path=self._metrics_db_path)
         except sqlite3.Error as exc:
             logger.error("Failed to record metrics for step %s: %s", step, exc)
+
+    def _log_query_sample(
+        self, query_id: str, question: str, answer: str, retrieval: RetrievalResult
+    ) -> None:
+        """Log a query for later evaluation. Never raises -- a logging
+        failure shouldn't break the actual query response. Costs no API
+        calls; scoring happens separately via monitoring/eval_loop.py.
+        """
+        sample = QuerySample(
+            query_id=query_id,
+            question=question,
+            answer=answer,
+            context=[result.text for result in retrieval.search_results],
+            timestamp=datetime.now(timezone.utc),
+        )
+        try:
+            log_query_sample(sample, db_path=self._eval_db_path)
+        except sqlite3.Error as exc:
+            logger.error("Failed to log query sample %s: %s", query_id, exc)
 
     async def close(self) -> None:
         """Release the underlying model client's resources."""
