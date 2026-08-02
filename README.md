@@ -62,6 +62,23 @@ flowchart LR
 
 Two separate Docker images rather than one: the API image carries the full ML stack (CPU-only torch build, not the default CUDA one); the UI image only needs `httpx` and `streamlit`, since it's just an HTTP client to the API. Deployed as two services on Railway.
 
+## Performance
+
+Measured on 13 real queries run through the full pipeline (same Claude/Qdrant/OpenAI backends the deployment uses) on 2026-08-02, spanning every document category, a tracking lookup, a combined tracking+knowledge query, and an out-of-scope refusal:
+
+| Step | Avg latency | Avg cost |
+|---|---|---|
+| PlannerAgent (Claude) | 1.9s | $0.0024 |
+| RetrieverAgent (deterministic) | 1.2s | — |
+| ResponseAgent (Claude) | 6.3s | $0.0255 |
+| **Total per query** | **~9.4s** | **~$0.028** |
+
+Answer quality, scored by the eval loop described above:
+- Faithfulness (answer claims checked against retrieved context): **0.98 average** across the 11 queries where the answer made checkable claims. The other 2 were correct refusals with no context to check against — one genuinely out-of-scope, one where retrieval found nothing relevant — so faithfulness is undefined for those rather than scored as low.
+- Answer relevancy (generated-question similarity to the real question): **0.68 average** across all 13.
+
+n=13 is enough to sanity-check the pipeline's real cost/latency/quality profile, not a statistically rigorous benchmark — it doesn't support claims about tail latency or worst-case behavior.
+
 ## Stack
 
 Python 3.12, Pydantic, PyMuPDF, OpenAI (embeddings, evaluation judge), Anthropic Claude + AutoGen (agents), Qdrant, BM25s, sentence-transformers, FastAPI, Streamlit, LangSmith, pytest.
