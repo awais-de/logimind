@@ -15,7 +15,7 @@ from api.models import MAX_QUESTION_LENGTH
 def _fake_result(question: str) -> OrchestratorResult:
     return OrchestratorResult(
         question=question,
-        plan=Plan(needs_knowledge_search=False, needs_tracking_lookup=False),
+        plan=Plan(),
         retrieval=RetrievalResult(),
         answer="answer",
     )

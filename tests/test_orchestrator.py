@@ -9,7 +9,7 @@ from autogen_core.models import RequestUsage
 
 from agents.model_client import build_claude_client
 from agents.orchestrator import Orchestrator
-from agents.planner import Plan
+from agents.planner import Plan, Step
 from agents.retriever import RetrievalResult
 from retrieval.semantic import SearchResult
 
@@ -34,7 +34,7 @@ def test_orchestrator_builds_named_agents(tmp_path: Path) -> None:
 async def test_ask_runs_planner_then_retriever_then_responder(tmp_path: Path) -> None:
     orchestrator = _make_orchestrator(tmp_path)
 
-    fake_plan = Plan(needs_knowledge_search=True, search_query="incoterms", needs_tracking_lookup=False)
+    fake_plan = Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")])
     fake_retrieval = RetrievalResult()
 
     with patch(
@@ -59,7 +59,7 @@ async def test_ask_runs_planner_then_retriever_then_responder(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_ask_records_metrics_for_all_three_steps(tmp_path: Path) -> None:
     orchestrator = _make_orchestrator(tmp_path)
-    fake_plan = Plan(needs_knowledge_search=False, needs_tracking_lookup=False)
+    fake_plan = Plan()
     planner_usage = RequestUsage(prompt_tokens=100, completion_tokens=20)
     responder_usage = RequestUsage(prompt_tokens=200, completion_tokens=50)
 
@@ -91,7 +91,7 @@ async def test_ask_records_metrics_for_all_three_steps(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_ask_logs_query_sample_for_eval(tmp_path: Path) -> None:
     orchestrator = _make_orchestrator(tmp_path)
-    fake_plan = Plan(needs_knowledge_search=True, search_query="incoterms", needs_tracking_lookup=False)
+    fake_plan = Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")])
     fake_result = SearchResult(
         chunk_id="c1", text="Incoterms define shipping responsibilities.", score=0.9,
         doc_id="doc1", doc_name="Incoterms Guide", category="incoterms", region=None, page_number=1,

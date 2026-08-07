@@ -1,53 +1,106 @@
 """RetrieverAgent: executes the PlannerAgent's plan using DHL tools."""
 
 import logging
+import re
 
 from pydantic import BaseModel
 
-from agents.planner import Plan
+from agents.planner import Plan, Step
 from agents.tools.dhl_search import dhl_knowledge_search
 from agents.tools.dhl_tracking_mock import dhl_tracking_mock
 from retrieval.semantic import SearchResult
 
 logger = logging.getLogger(__name__)
 
+_PLACEHOLDER_RE = re.compile(r"\{\{step_(\d+)\.(\w+)\}\}")
+
 
 class RetrievalResult(BaseModel):
     """Everything RetrieverAgent gathered for a Plan.
 
     Attributes:
-        search_results: Chunks found via dhl_knowledge_search, if the plan
-            requested a knowledge search.
-        tracking_info: Mock tracking status, if the plan requested a
-            tracking lookup.
+        search_results: Chunks found via dhl_knowledge_search, across all
+            "knowledge_search" steps in the plan.
+        tracking_info: Mock tracking status from the plan's
+            "tracking_lookup" step. If a plan has more than one, the last
+            one's result wins.
     """
 
     search_results: list[SearchResult] = []
     tracking_info: dict | None = None
 
 
+def _resolve(value: str | None, step_results: list[dict | list[SearchResult]]) -> str | None:
+    """Substitute `{{step_N.field}}` placeholders in a step field.
+
+    Args:
+        value: The field's raw value, possibly containing placeholders
+            referencing an earlier, already-executed step's result.
+        step_results: Results of steps executed so far, in order.
+
+    Returns:
+        value with any placeholders replaced by the referenced step's
+        field value, or None if value is None.
+
+    Raises:
+        ValueError: A placeholder references a step that hasn't run yet,
+            or a field its result doesn't have (only "tracking_lookup"
+            steps -- dict results -- can be referenced this way).
+    """
+    if value is None:
+        return None
+
+    def replace(match: re.Match) -> str:
+        step_number, field = match.group(1), match.group(2)
+        index = int(step_number) - 1
+        if index < 0 or index >= len(step_results):
+            raise ValueError(f"Step references step_{step_number}, which hasn't run yet")
+        result = step_results[index]
+        if not isinstance(result, dict) or field not in result:
+            raise ValueError(f"Step references {{{{step_{step_number}.{field}}}}}, but step_{step_number}'s result has no '{field}' field")
+        return str(result[field])
+
+    return _PLACEHOLDER_RE.sub(replace, value)
+
+
+def _execute_step(step: Step, step_results: list[dict | list[SearchResult]]) -> dict | list[SearchResult]:
+    """Run one step's tool call, resolving placeholders against prior results."""
+    if step.tool == "knowledge_search":
+        query = _resolve(step.search_query, step_results)
+        return dhl_knowledge_search(query) if query else []
+
+    tracking_number = _resolve(step.tracking_number, step_results)
+    return dhl_tracking_mock(tracking_number) if tracking_number else {}
+
+
 def run_retriever(plan: Plan) -> RetrievalResult:
-    """Execute a PlannerAgent Plan by calling the tools it specifies.
+    """Execute a PlannerAgent Plan by calling the tools its steps specify.
 
     This deliberately isn't an LLM-backed AutoGen agent: PlannerAgent has
     already decided what's needed, so executing that decision is a plain,
     deterministic dispatch rather than something requiring another model
-    call.
+    call. Steps run in order so a later step can reference an earlier
+    step's result via a `{{step_N.field}}` placeholder.
 
     Args:
         plan: The plan produced by PlannerAgent.
 
     Returns:
-        Whatever knowledge-search results and/or tracking info the plan
-        called for. Both fields are empty/None if the plan needed neither.
+        Whatever knowledge-search results and/or tracking info the plan's
+        steps called for. Both fields are empty/None if the plan had no
+        steps.
     """
     search_results: list[SearchResult] = []
     tracking_info: dict | None = None
+    step_results: list[dict | list[SearchResult]] = []
 
-    if plan.needs_knowledge_search and plan.search_query:
-        search_results = dhl_knowledge_search(plan.search_query)
+    for step in plan.steps:
+        result = _execute_step(step, step_results)
+        step_results.append(result)
 
-    if plan.needs_tracking_lookup and plan.tracking_number:
-        tracking_info = dhl_tracking_mock(plan.tracking_number)
+        if step.tool == "knowledge_search":
+            search_results.extend(result)
+        elif result:
+            tracking_info = result
 
     return RetrievalResult(search_results=search_results, tracking_info=tracking_info)

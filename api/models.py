@@ -77,7 +77,7 @@ class QueryResponse(BaseModel):
         return cls(
             answer=result.answer,
             citations=citations,
-            needs_knowledge_search=result.plan.needs_knowledge_search,
-            needs_tracking_lookup=result.plan.needs_tracking_lookup,
+            needs_knowledge_search=any(s.tool == "knowledge_search" for s in result.plan.steps),
+            needs_tracking_lookup=any(s.tool == "tracking_lookup" for s in result.plan.steps),
             tracking_info=result.retrieval.tracking_info,
         )

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from agents.orchestrator import OrchestratorResult
-from agents.planner import Plan
+from agents.planner import Plan, Step
 from agents.retriever import RetrievalResult
 from api.models import QueryRequest, QueryResponse
 from retrieval.semantic import SearchResult
@@ -32,7 +32,7 @@ def test_query_request_requires_question() -> None:
 
 
 def test_query_response_from_orchestrator_result_with_search_results() -> None:
-    plan = Plan(needs_knowledge_search=True, search_query="incoterms", needs_tracking_lookup=False)
+    plan = Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")])
     retrieval = RetrievalResult(search_results=[_result("c1", "x" * 300, 0.87)])
     orchestrator_result = OrchestratorResult(
         question="what are the incoterms?", plan=plan, retrieval=retrieval, answer="Here is the answer."
@@ -53,7 +53,7 @@ def test_query_response_from_orchestrator_result_with_search_results() -> None:
 
 
 def test_query_response_from_orchestrator_result_with_tracking_info() -> None:
-    plan = Plan(needs_knowledge_search=False, needs_tracking_lookup=True, tracking_number="123")
+    plan = Plan(steps=[Step(tool="tracking_lookup", tracking_number="123")])
     retrieval = RetrievalResult(tracking_info={"status": "Delivered"})
     orchestrator_result = OrchestratorResult(
         question="where is my package?", plan=plan, retrieval=retrieval, answer="It was delivered."

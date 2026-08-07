@@ -1,30 +1,43 @@
 """PlannerAgent: decides what information is needed to answer a user query."""
 
 import re
+from typing import Literal
 
 from autogen_agentchat.agents import AssistantAgent
 from autogen_core.models import ChatCompletionClient, RequestUsage
 from pydantic import BaseModel, ValidationError
 
-from monitoring.prompt_versions.planner import PLANNER_SYSTEM_PROMPT_V1
+from monitoring.prompt_versions.planner import PLANNER_SYSTEM_PROMPT_V2
+
+
+class Step(BaseModel):
+    """One action within a Plan.
+
+    Attributes:
+        tool: Which tool this step calls.
+        search_query: Query text for a "knowledge_search" step. May
+            reference an earlier step's result via a `{{step_N.field}}`
+            placeholder (1-indexed), resolved against that step's result
+            by run_retriever before the tool is called.
+        tracking_number: Tracking number for a "tracking_lookup" step. May
+            also use a `{{step_N.field}}` placeholder.
+    """
+
+    tool: Literal["knowledge_search", "tracking_lookup"]
+    search_query: str | None = None
+    tracking_number: str | None = None
 
 
 class Plan(BaseModel):
     """Structured plan produced by PlannerAgent for a user query.
 
     Attributes:
-        needs_knowledge_search: Whether DHL's knowledge base should be
-            searched to answer the query.
-        search_query: The query to search with, if needs_knowledge_search.
-        needs_tracking_lookup: Whether a shipment tracking lookup is needed.
-        tracking_number: The tracking number to look up, if
-            needs_tracking_lookup and one was found in the user's message.
+        steps: Ordered actions needed to answer the query, empty if none
+            are needed. A later step may depend on an earlier one's result
+            via a `{{step_N.field}}` placeholder in its own fields.
     """
 
-    needs_knowledge_search: bool
-    search_query: str | None = None
-    needs_tracking_lookup: bool
-    tracking_number: str | None = None
+    steps: list[Step] = []
 
 
 def build_planner_agent(model_client: ChatCompletionClient) -> AssistantAgent:
@@ -47,7 +60,7 @@ def build_planner_agent(model_client: ChatCompletionClient) -> AssistantAgent:
     return AssistantAgent(
         name="PlannerAgent",
         model_client=model_client,
-        system_message=PLANNER_SYSTEM_PROMPT_V1,
+        system_message=PLANNER_SYSTEM_PROMPT_V2,
     )
 
 

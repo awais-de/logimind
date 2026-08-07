@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from agents.orchestrator import OrchestratorResult
-from agents.planner import Plan
+from agents.planner import Plan, Step
 from agents.retriever import RetrievalResult
 from api.main import app
 
@@ -16,7 +16,7 @@ async def test_query_endpoint_returns_answer_with_citations() -> None:
     fake_orchestrator = AsyncMock()
     fake_orchestrator.ask.return_value = OrchestratorResult(
         question="what are the incoterms?",
-        plan=Plan(needs_knowledge_search=True, search_query="incoterms", needs_tracking_lookup=False),
+        plan=Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")]),
         retrieval=RetrievalResult(),
         answer="Incoterms define buyer/seller responsibilities.",
     )
