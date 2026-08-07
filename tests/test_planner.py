@@ -89,7 +89,7 @@ def test_parse_plan_raises_on_no_json() -> None:
 
 def test_parse_plan_raises_on_schema_mismatch() -> None:
     with pytest.raises(ValueError, match="did not match Plan schema"):
-        parse_plan('{"foo": "bar"}')
+        parse_plan('{"steps": [{"tool": "not_a_real_tool"}]}')
 
 
 @pytest.mark.asyncio
