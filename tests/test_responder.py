@@ -52,12 +52,32 @@ def test_format_context_includes_tracking_info() -> None:
     assert "origin: Bonn, DE" in context
 
 
+def test_format_context_includes_compliance_results() -> None:
+    retrieval = RetrievalResult(
+        compliance_results=[
+            {
+                "category": "lithium_batteries",
+                "destination": "DE",
+                "restrictions": ["Must be shipped as Dangerous Goods"],
+                "documentation_required": ["UN38.3 test summary"],
+            }
+        ]
+    )
+
+    context = _format_context("can I ship batteries to Germany?", retrieval)
+
+    assert "Category: lithium_batteries, Destination: DE" in context
+    assert "Must be shipped as Dangerous Goods" in context
+    assert "UN38.3 test summary" in context
+
+
 def test_format_context_handles_empty_retrieval() -> None:
     retrieval = RetrievalResult()
 
     context = _format_context("what's the weather?", retrieval)
 
     assert "No relevant document excerpts were found." in context
+    assert "No compliance rules were looked up." in context
     assert "No tracking information was requested or found." in context
 
 

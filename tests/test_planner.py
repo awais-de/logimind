@@ -82,6 +82,22 @@ def test_parse_plan_handles_ordered_multi_step_plan_with_dependency() -> None:
     assert plan.steps[1].search_query == "customs rules for {{step_1.destination}}"
 
 
+def test_parse_plan_handles_plan_combining_all_three_tools() -> None:
+    raw = (
+        '{"steps": ['
+        '{"tool": "tracking_lookup", "tracking_number": "1234567890", "search_query": null, "category": null, "destination": null}, '
+        '{"tool": "compliance_lookup", "category": "lithium_batteries", "destination": "{{step_1.destination}}", "search_query": null, "tracking_number": null}, '
+        '{"tool": "knowledge_search", "search_query": "battery packing requirements", "tracking_number": null, "category": null, "destination": null}'
+        "]}"
+    )
+
+    plan = parse_plan(raw)
+
+    assert [step.tool for step in plan.steps] == ["tracking_lookup", "compliance_lookup", "knowledge_search"]
+    assert plan.steps[1].category == "lithium_batteries"
+    assert plan.steps[1].destination == "{{step_1.destination}}"
+
+
 def test_parse_plan_raises_on_no_json() -> None:
     with pytest.raises(ValueError, match="No JSON object found"):
         parse_plan("I'm not sure how to answer that.")

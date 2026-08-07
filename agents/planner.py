@@ -7,7 +7,7 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_core.models import ChatCompletionClient, RequestUsage
 from pydantic import BaseModel, ValidationError
 
-from monitoring.prompt_versions.planner import PLANNER_SYSTEM_PROMPT_V2
+from monitoring.prompt_versions.planner import PLANNER_SYSTEM_PROMPT_V3
 
 
 class Step(BaseModel):
@@ -21,11 +21,18 @@ class Step(BaseModel):
             by run_retriever before the tool is called.
         tracking_number: Tracking number for a "tracking_lookup" step. May
             also use a `{{step_N.field}}` placeholder.
+        category: Item category or classification for a
+            "compliance_lookup" step.
+        destination: Destination country/region code for a
+            "compliance_lookup" step. May also use a `{{step_N.field}}`
+            placeholder.
     """
 
-    tool: Literal["knowledge_search", "tracking_lookup"]
+    tool: Literal["knowledge_search", "tracking_lookup", "compliance_lookup"]
     search_query: str | None = None
     tracking_number: str | None = None
+    category: str | None = None
+    destination: str | None = None
 
 
 class Plan(BaseModel):
@@ -60,7 +67,7 @@ def build_planner_agent(model_client: ChatCompletionClient) -> AssistantAgent:
     return AssistantAgent(
         name="PlannerAgent",
         model_client=model_client,
-        system_message=PLANNER_SYSTEM_PROMPT_V2,
+        system_message=PLANNER_SYSTEM_PROMPT_V3,
     )
 
 

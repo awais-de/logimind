@@ -130,3 +130,60 @@ def test_run_retriever_raises_when_placeholder_field_missing() -> None:
     with patch("agents.retriever.dhl_tracking_mock", return_value={"destination": "Bonn, DE"}):
         with pytest.raises(ValueError, match="nonexistent_field"):
             run_retriever(plan)
+
+
+def test_run_retriever_calls_compliance_lookup_when_needed() -> None:
+    plan = Plan(steps=[Step(tool="compliance_lookup", category="lithium_batteries", destination="DE")])
+    rule = {"category": "lithium_batteries", "destination": "DE", "restrictions": [], "documentation_required": []}
+
+    with patch("agents.retriever.compliance_lookup", return_value=rule) as mock_compliance:
+        result = run_retriever(plan)
+
+    mock_compliance.assert_called_once_with("lithium_batteries", "DE")
+    assert result.compliance_results == [rule]
+
+
+def test_run_retriever_skips_unmatched_compliance_lookup() -> None:
+    plan = Plan(steps=[Step(tool="compliance_lookup", category="unknown", destination="DE")])
+
+    with patch("agents.retriever.compliance_lookup", return_value=None):
+        result = run_retriever(plan)
+
+    assert result.compliance_results == []
+
+
+def test_run_retriever_resolves_compliance_destination_from_earlier_tracking_step() -> None:
+    plan = Plan(
+        steps=[
+            Step(tool="tracking_lookup", tracking_number="1234567890"),
+            Step(tool="compliance_lookup", category="alcohol", destination="{{step_1.destination}}"),
+        ]
+    )
+    rule = {"category": "alcohol", "destination": "DE", "restrictions": [], "documentation_required": []}
+
+    with patch(
+        "agents.retriever.dhl_tracking_mock", return_value={"destination": "Bonn, DE"}
+    ), patch("agents.retriever.compliance_lookup", return_value=rule) as mock_compliance:
+        result = run_retriever(plan)
+
+    mock_compliance.assert_called_once_with("alcohol", "Bonn, DE")
+    assert result.compliance_results == [rule]
+
+
+def test_run_retriever_combines_compliance_and_knowledge_search_in_one_plan() -> None:
+    plan = Plan(
+        steps=[
+            Step(tool="compliance_lookup", category="lithium_batteries", destination="DE"),
+            Step(tool="knowledge_search", search_query="battery packing requirements"),
+        ]
+    )
+    rule = {"category": "lithium_batteries", "destination": "DE", "restrictions": [], "documentation_required": []}
+
+    with patch("agents.retriever.compliance_lookup", return_value=rule), patch(
+        "agents.retriever.dhl_knowledge_search", return_value=[_result("c1")]
+    ) as mock_search:
+        result = run_retriever(plan)
+
+    mock_search.assert_called_once_with("battery packing requirements")
+    assert result.compliance_results == [rule]
+    assert result.search_results == [_result("c1")]

@@ -6,7 +6,7 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_core.models import ChatCompletionClient, RequestUsage
 
 from agents.retriever import RetrievalResult
-from monitoring.prompt_versions.responder import RESPONDER_SYSTEM_PROMPT_V1
+from monitoring.prompt_versions.responder import RESPONDER_SYSTEM_PROMPT_V2
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def build_responder_agent(model_client: ChatCompletionClient) -> AssistantAgent:
     return AssistantAgent(
         name="ResponseAgent",
         model_client=model_client,
-        system_message=RESPONDER_SYSTEM_PROMPT_V1,
+        system_message=RESPONDER_SYSTEM_PROMPT_V2,
     )
 
 
@@ -47,6 +47,19 @@ def _format_context(question: str, retrieval: RetrievalResult) -> str:
             parts.append(f"{key}: {value}")
     else:
         parts.append("No tracking information was requested or found.")
+
+    parts.append("")
+
+    if retrieval.compliance_results:
+        parts.append("Compliance rules matched:")
+        for rule in retrieval.compliance_results:
+            parts.append(
+                f"[Category: {rule['category']}, Destination: {rule['destination']}]\n"
+                f"Restrictions: {'; '.join(rule['restrictions'])}\n"
+                f"Documentation required: {'; '.join(rule['documentation_required'])}"
+            )
+    else:
+        parts.append("No compliance rules were looked up.")
 
     return "\n".join(parts)
 

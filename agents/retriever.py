@@ -6,6 +6,7 @@ import re
 from pydantic import BaseModel
 
 from agents.planner import Plan, Step
+from agents.tools.compliance_lookup import compliance_lookup
 from agents.tools.dhl_search import dhl_knowledge_search
 from agents.tools.dhl_tracking_mock import dhl_tracking_mock
 from retrieval.semantic import SearchResult
@@ -24,10 +25,14 @@ class RetrievalResult(BaseModel):
         tracking_info: Mock tracking status from the plan's
             "tracking_lookup" step. If a plan has more than one, the last
             one's result wins.
+        compliance_results: Matched rules from all "compliance_lookup"
+            steps in the plan. A step whose category/destination matched
+            no rule contributes nothing here.
     """
 
     search_results: list[SearchResult] = []
     tracking_info: dict | None = None
+    compliance_results: list[dict] = []
 
 
 def _resolve(value: str | None, step_results: list[dict | list[SearchResult]]) -> str | None:
@@ -69,8 +74,15 @@ def _execute_step(step: Step, step_results: list[dict | list[SearchResult]]) -> 
         query = _resolve(step.search_query, step_results)
         return dhl_knowledge_search(query) if query else []
 
-    tracking_number = _resolve(step.tracking_number, step_results)
-    return dhl_tracking_mock(tracking_number) if tracking_number else {}
+    if step.tool == "tracking_lookup":
+        tracking_number = _resolve(step.tracking_number, step_results)
+        return dhl_tracking_mock(tracking_number) if tracking_number else {}
+
+    category = _resolve(step.category, step_results)
+    destination = _resolve(step.destination, step_results)
+    if not category or not destination:
+        return {}
+    return compliance_lookup(category, destination) or {}
 
 
 def run_retriever(plan: Plan) -> RetrievalResult:
@@ -86,12 +98,13 @@ def run_retriever(plan: Plan) -> RetrievalResult:
         plan: The plan produced by PlannerAgent.
 
     Returns:
-        Whatever knowledge-search results and/or tracking info the plan's
-        steps called for. Both fields are empty/None if the plan had no
-        steps.
+        Whatever knowledge-search results, tracking info, and/or
+        compliance rules the plan's steps called for. All fields are
+        empty/None if the plan had no steps.
     """
     search_results: list[SearchResult] = []
     tracking_info: dict | None = None
+    compliance_results: list[dict] = []
     step_results: list[dict | list[SearchResult]] = []
 
     for step in plan.steps:
@@ -100,7 +113,14 @@ def run_retriever(plan: Plan) -> RetrievalResult:
 
         if step.tool == "knowledge_search":
             search_results.extend(result)
+        elif step.tool == "tracking_lookup":
+            if result:
+                tracking_info = result
         elif result:
-            tracking_info = result
+            compliance_results.append(result)
 
-    return RetrievalResult(search_results=search_results, tracking_info=tracking_info)
+    return RetrievalResult(
+        search_results=search_results,
+        tracking_info=tracking_info,
+        compliance_results=compliance_results,
+    )
