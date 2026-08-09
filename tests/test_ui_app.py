@@ -1,10 +1,11 @@
 """Headless tests for ui/app.py using Streamlit's AppTest."""
 
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from streamlit.testing.v1 import AppTest
 
-APP_PATH = "ui/app.py"
+APP_PATH = str(Path(__file__).resolve().parents[1] / "ui" / "app.py")
 
 
 def test_app_shows_api_connected_when_health_check_succeeds() -> None:
