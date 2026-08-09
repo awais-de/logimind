@@ -9,11 +9,14 @@ from agents.planner import Plan, Step
 from agents.tools.compliance_lookup import compliance_lookup
 from agents.tools.dhl_search import dhl_knowledge_search
 from agents.tools.dhl_tracking_mock import dhl_tracking_mock
+from agents.tools.sql_query import run_sql_query
 from retrieval.semantic import SearchResult
 
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{\{step_(\d+)\.(\w+)\}\}")
+
+_StepResult = dict | list[SearchResult] | list[dict]
 
 
 class RetrievalResult(BaseModel):
@@ -28,14 +31,16 @@ class RetrievalResult(BaseModel):
         compliance_results: Matched rules from all "compliance_lookup"
             steps in the plan. A step whose category/destination matched
             no rule contributes nothing here.
+        sql_results: Rows returned by all "sql_query" steps in the plan.
     """
 
     search_results: list[SearchResult] = []
     tracking_info: dict | None = None
     compliance_results: list[dict] = []
+    sql_results: list[dict] = []
 
 
-def _resolve(value: str | None, step_results: list[dict | list[SearchResult]]) -> str | None:
+def _resolve(value: str | None, step_results: list[_StepResult]) -> str | None:
     """Substitute `{{step_N.field}}` placeholders in a step field.
 
     Args:
@@ -49,8 +54,10 @@ def _resolve(value: str | None, step_results: list[dict | list[SearchResult]]) -
 
     Raises:
         ValueError: A placeholder references a step that hasn't run yet,
-            or a field its result doesn't have (only "tracking_lookup"
-            steps -- dict results -- can be referenced this way).
+            or a field its result doesn't have. Only steps with a single
+            dict result ("tracking_lookup", "compliance_lookup") can be
+            referenced this way -- "knowledge_search" and "sql_query"
+            steps return a list of results, not one addressable value.
     """
     if value is None:
         return None
@@ -68,7 +75,7 @@ def _resolve(value: str | None, step_results: list[dict | list[SearchResult]]) -
     return _PLACEHOLDER_RE.sub(replace, value)
 
 
-def _execute_step(step: Step, step_results: list[dict | list[SearchResult]]) -> dict | list[SearchResult]:
+def _execute_step(step: Step, step_results: list[_StepResult]) -> _StepResult:
     """Run one step's tool call, resolving placeholders against prior results."""
     if step.tool == "knowledge_search":
         query = _resolve(step.search_query, step_results)
@@ -78,11 +85,15 @@ def _execute_step(step: Step, step_results: list[dict | list[SearchResult]]) -> 
         tracking_number = _resolve(step.tracking_number, step_results)
         return dhl_tracking_mock(tracking_number) if tracking_number else {}
 
-    category = _resolve(step.category, step_results)
-    destination = _resolve(step.destination, step_results)
-    if not category or not destination:
-        return {}
-    return compliance_lookup(category, destination) or {}
+    if step.tool == "compliance_lookup":
+        category = _resolve(step.category, step_results)
+        destination = _resolve(step.destination, step_results)
+        if not category or not destination:
+            return {}
+        return compliance_lookup(category, destination) or {}
+
+    sql_query = _resolve(step.sql_query, step_results)
+    return run_sql_query(sql_query) if sql_query else []
 
 
 def run_retriever(plan: Plan) -> RetrievalResult:
@@ -98,14 +109,15 @@ def run_retriever(plan: Plan) -> RetrievalResult:
         plan: The plan produced by PlannerAgent.
 
     Returns:
-        Whatever knowledge-search results, tracking info, and/or
-        compliance rules the plan's steps called for. All fields are
-        empty/None if the plan had no steps.
+        Whatever knowledge-search results, tracking info, compliance
+        rules, and/or SQL rows the plan's steps called for. All fields
+        are empty/None if the plan had no steps.
     """
     search_results: list[SearchResult] = []
     tracking_info: dict | None = None
     compliance_results: list[dict] = []
-    step_results: list[dict | list[SearchResult]] = []
+    sql_results: list[dict] = []
+    step_results: list[_StepResult] = []
 
     for step in plan.steps:
         result = _execute_step(step, step_results)
@@ -116,11 +128,15 @@ def run_retriever(plan: Plan) -> RetrievalResult:
         elif step.tool == "tracking_lookup":
             if result:
                 tracking_info = result
-        elif result:
-            compliance_results.append(result)
+        elif step.tool == "compliance_lookup":
+            if result:
+                compliance_results.append(result)
+        else:
+            sql_results.extend(result)
 
     return RetrievalResult(
         search_results=search_results,
         tracking_info=tracking_info,
         compliance_results=compliance_results,
+        sql_results=sql_results,
     )

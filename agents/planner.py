@@ -7,7 +7,7 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_core.models import ChatCompletionClient, RequestUsage
 from pydantic import BaseModel, ValidationError
 
-from monitoring.prompt_versions.planner import PLANNER_SYSTEM_PROMPT_V3
+from monitoring.prompt_versions.planner import PLANNER_SYSTEM_PROMPT_V4
 
 
 class Step(BaseModel):
@@ -26,13 +26,18 @@ class Step(BaseModel):
         destination: Destination country/region code for a
             "compliance_lookup" step. May also use a `{{step_N.field}}`
             placeholder.
+        sql_query: A read-only SQL SELECT statement for a "sql_query"
+            step, written directly against the structured dataset's
+            schema (see the system prompt) -- validated and executed as
+            given, not further interpreted.
     """
 
-    tool: Literal["knowledge_search", "tracking_lookup", "compliance_lookup"]
+    tool: Literal["knowledge_search", "tracking_lookup", "compliance_lookup", "sql_query"]
     search_query: str | None = None
     tracking_number: str | None = None
     category: str | None = None
     destination: str | None = None
+    sql_query: str | None = None
 
 
 class Plan(BaseModel):
@@ -67,7 +72,7 @@ def build_planner_agent(model_client: ChatCompletionClient) -> AssistantAgent:
     return AssistantAgent(
         name="PlannerAgent",
         model_client=model_client,
-        system_message=PLANNER_SYSTEM_PROMPT_V3,
+        system_message=PLANNER_SYSTEM_PROMPT_V4,
     )
 
 

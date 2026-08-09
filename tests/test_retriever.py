@@ -187,3 +187,34 @@ def test_run_retriever_combines_compliance_and_knowledge_search_in_one_plan() ->
     mock_search.assert_called_once_with("battery packing requirements")
     assert result.compliance_results == [rule]
     assert result.search_results == [_result("c1")]
+
+
+def test_run_retriever_calls_sql_query_when_needed() -> None:
+    plan = Plan(steps=[Step(tool="sql_query", sql_query="SELECT name FROM segments")])
+    rows = [{"name": "Express"}, {"name": "Supply Chain"}]
+
+    with patch("agents.retriever.run_sql_query", return_value=rows) as mock_sql:
+        result = run_retriever(plan)
+
+    mock_sql.assert_called_once_with("SELECT name FROM segments")
+    assert result.sql_results == rows
+
+
+def test_run_retriever_skips_sql_query_step_with_no_query() -> None:
+    plan = Plan(steps=[Step(tool="sql_query", sql_query=None)])
+
+    with patch("agents.retriever.run_sql_query") as mock_sql:
+        result = run_retriever(plan)
+
+    mock_sql.assert_not_called()
+    assert result.sql_results == []
+
+
+def test_run_retriever_propagates_unsafe_query_error() -> None:
+    from agents.tools.sql_query import UnsafeQueryError
+
+    plan = Plan(steps=[Step(tool="sql_query", sql_query="DROP TABLE segments")])
+
+    with patch("agents.retriever.run_sql_query", side_effect=UnsafeQueryError("nope")):
+        with pytest.raises(UnsafeQueryError):
+            run_retriever(plan)

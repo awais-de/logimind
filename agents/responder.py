@@ -6,7 +6,7 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_core.models import ChatCompletionClient, RequestUsage
 
 from agents.retriever import RetrievalResult
-from monitoring.prompt_versions.responder import RESPONDER_SYSTEM_PROMPT_V2
+from monitoring.prompt_versions.responder import RESPONDER_SYSTEM_PROMPT_V3
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def build_responder_agent(model_client: ChatCompletionClient) -> AssistantAgent:
     return AssistantAgent(
         name="ResponseAgent",
         model_client=model_client,
-        system_message=RESPONDER_SYSTEM_PROMPT_V2,
+        system_message=RESPONDER_SYSTEM_PROMPT_V3,
     )
 
 
@@ -60,6 +60,15 @@ def _format_context(question: str, retrieval: RetrievalResult) -> str:
             )
     else:
         parts.append("No compliance rules were looked up.")
+
+    parts.append("")
+
+    if retrieval.sql_results:
+        parts.append("Structured dataset query results:")
+        for row in retrieval.sql_results:
+            parts.append(", ".join(f"{key}: {value}" for key, value in row.items()))
+    else:
+        parts.append("No structured dataset query was run.")
 
     return "\n".join(parts)
 

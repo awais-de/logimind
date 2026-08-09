@@ -71,6 +71,15 @@ def test_format_context_includes_compliance_results() -> None:
     assert "UN38.3 test summary" in context
 
 
+def test_format_context_includes_sql_results() -> None:
+    retrieval = RetrievalResult(sql_results=[{"name": "Express", "revenue_eur_millions": 24511}])
+
+    context = _format_context("what was Express revenue in 2024?", retrieval)
+
+    assert "name: Express" in context
+    assert "revenue_eur_millions: 24511" in context
+
+
 def test_format_context_handles_empty_retrieval() -> None:
     retrieval = RetrievalResult()
 
@@ -78,6 +87,7 @@ def test_format_context_handles_empty_retrieval() -> None:
 
     assert "No relevant document excerpts were found." in context
     assert "No compliance rules were looked up." in context
+    assert "No structured dataset query was run." in context
     assert "No tracking information was requested or found." in context
 
 
