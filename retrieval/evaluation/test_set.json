@@ -1,0 +1,51 @@
+[
+  {
+    "id": "restricted-items-loose-batteries",
+    "question": "Can I send loose batteries or power banks with DHL?",
+    "ground_truth": "No. Loose batteries and power banks cannot be sent, and a battery that has been detached from its device cannot be sent either.",
+    "source_doc_id": "dhl-prohibited-restricted-items",
+    "source_page": 1
+  },
+  {
+    "id": "restricted-items-lithium-devices",
+    "question": "How many phones, tablets, or laptops with lithium batteries can I pack in one box?",
+    "ground_truth": "A device may contain a maximum of two batteries, and you may package a maximum of two such devices in one box. A shipment (one airwaybill) may contain a maximum of two boxes with two devices each.",
+    "source_doc_id": "dhl-prohibited-restricted-items",
+    "source_page": 2
+  },
+  {
+    "id": "restricted-items-jewelry-value",
+    "question": "What is the maximum value for jewelry and watches sent via DHL?",
+    "ground_truth": "Up to €10,000, and this maximum applies to both the total shipment value and the value of individual items.",
+    "source_doc_id": "dhl-prohibited-restricted-items",
+    "source_page": 2
+  },
+  {
+    "id": "restricted-items-wireless-earbuds",
+    "question": "Can I ship wireless earbuds with DHL?",
+    "ground_truth": "Yes, but only without the charger, since the charger is considered a battery and cannot be sent with or separately from the earbuds.",
+    "source_doc_id": "dhl-prohibited-restricted-items",
+    "source_page": 2
+  },
+  {
+    "id": "packing-guide-box5-weight-limit",
+    "question": "What is the weight limit for DHL's Box 5 packaging?",
+    "ground_truth": "Box 5 has a weight limit of 10 kg, with dimensions 337 x 322 x 345 mm.",
+    "source_doc_id": "dhl-packing-guide",
+    "source_page": 5
+  },
+  {
+    "id": "packing-guide-box8-weight-limit",
+    "question": "What is the maximum weight capacity of DHL's largest standard box, Box 8?",
+    "ground_truth": "Box 8 has a weight limit of 25 kg.",
+    "source_doc_id": "dhl-packing-guide",
+    "source_page": 5
+  },
+  {
+    "id": "annual-report-2024-total-revenue",
+    "question": "What was DHL Group's total revenue in fiscal year 2024?",
+    "ground_truth": "DHL Group's total revenue in fiscal year 2024 was €84,186 million, an increase of €2,428 million over the prior year.",
+    "source_doc_id": "dhl-annual-report-2024",
+    "source_page": 183
+  }
+]
