@@ -8,18 +8,30 @@ import pytest
 from autogen_core.models import RequestUsage
 
 from agents.model_client import build_claude_client
-from agents.orchestrator import Orchestrator
+from agents.orchestrator import Orchestrator, OrchestratorResult
 from agents.planner import Plan, Step
 from agents.retriever import RetrievalResult
 from retrieval.semantic import SearchResult
 
 
-def _make_orchestrator(tmp_path: Path, model_client=None) -> Orchestrator:
+def _fake_cache(hit: str | None = None) -> Mock:
+    """A SemanticCache stand-in that never makes real embedding calls.
+
+    Defaults to always missing, so existing tests exercise the full
+    pipeline exactly as before the cache was wired in.
+    """
+    cache = Mock()
+    cache.get.return_value = hit
+    return cache
+
+
+def _make_orchestrator(tmp_path: Path, model_client=None, cache=None) -> Orchestrator:
     client = model_client or build_claude_client(api_key="dummy-test-key")
     return Orchestrator(
         model_client=client,
         metrics_db_path=tmp_path / "metrics.db",
         eval_db_path=tmp_path / "metrics.db",
+        cache=cache if cache is not None else _fake_cache(),
     )
 
 
@@ -54,6 +66,72 @@ async def test_ask_runs_planner_then_retriever_then_responder(tmp_path: Path) ->
     assert result.plan == fake_plan
     assert result.retrieval == fake_retrieval
     assert result.answer == "final answer"
+
+
+@pytest.mark.asyncio
+async def test_ask_caches_result_on_a_miss(tmp_path: Path) -> None:
+    cache = _fake_cache(hit=None)
+    orchestrator = _make_orchestrator(tmp_path, cache=cache)
+    fake_plan = Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")])
+    fake_retrieval = RetrievalResult()
+
+    with patch(
+        "agents.orchestrator.run_planner", new=AsyncMock(return_value=(fake_plan, None))
+    ), patch(
+        "agents.orchestrator.run_retriever", return_value=fake_retrieval
+    ), patch(
+        "agents.orchestrator.run_responder", new=AsyncMock(return_value=("final answer", None))
+    ):
+        result = await orchestrator.ask("what are the incoterms?")
+
+    cache.get.assert_called_once_with("what are the incoterms?")
+    cache.set.assert_called_once_with("what are the incoterms?", result.model_dump_json())
+
+
+@pytest.mark.asyncio
+async def test_ask_returns_cached_result_on_a_hit_without_running_pipeline(tmp_path: Path) -> None:
+    cached_result = OrchestratorResult(
+        question="what are the incoterms?",
+        plan=Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")]),
+        retrieval=RetrievalResult(),
+        answer="cached answer",
+    )
+    cache = _fake_cache(hit=cached_result.model_dump_json())
+    orchestrator = _make_orchestrator(tmp_path, cache=cache)
+
+    with patch("agents.orchestrator.run_planner", new=AsyncMock()) as mock_planner, patch(
+        "agents.orchestrator.run_retriever"
+    ) as mock_retriever, patch("agents.orchestrator.run_responder", new=AsyncMock()) as mock_responder:
+        result = await orchestrator.ask("what are the incoterms?")
+
+    mock_planner.assert_not_awaited()
+    mock_retriever.assert_not_called()
+    mock_responder.assert_not_awaited()
+    cache.set.assert_not_called()
+
+    assert result.answer == "cached answer"
+    assert result.question == "what are the incoterms?"
+
+
+@pytest.mark.asyncio
+async def test_ask_records_cache_hit_metric(tmp_path: Path) -> None:
+    cached_result = OrchestratorResult(
+        question="what are the incoterms?", plan=Plan(), retrieval=RetrievalResult(), answer="cached answer"
+    )
+    cache = _fake_cache(hit=cached_result.model_dump_json())
+    orchestrator = _make_orchestrator(tmp_path, cache=cache)
+
+    await orchestrator.ask("what are the incoterms?")
+
+    connection = sqlite3.connect(tmp_path / "metrics.db")
+    row = connection.execute(
+        "SELECT step, model, cost_usd FROM step_metrics ORDER BY id"
+    ).fetchone()
+    connection.close()
+
+    assert row[0] == "cache_hit"
+    assert row[1] is None
+    assert row[2] is None
 
 
 @pytest.mark.asyncio

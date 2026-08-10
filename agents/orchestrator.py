@@ -17,6 +17,7 @@ from agents.responder import build_responder_agent, run_responder
 from agents.retriever import RetrievalResult, run_retriever
 from monitoring.eval_loop import EVAL_DB_PATH, QuerySample, log_query_sample
 from monitoring.metrics import METRICS_DB_PATH, StepMetric, compute_cost, record_step
+from retrieval.cache import SemanticCache
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class Orchestrator:
         model: str = DEFAULT_MODEL,
         metrics_db_path: Path = METRICS_DB_PATH,
         eval_db_path: Path = EVAL_DB_PATH,
+        cache: SemanticCache | None = None,
     ) -> None:
         """Build the pipeline's agents.
 
@@ -66,11 +68,14 @@ class Orchestrator:
             metrics_db_path: SQLite database step metrics are written to.
             eval_db_path: SQLite database query samples are logged to, for
                 later RAGAS-style evaluation via monitoring/eval_loop.py.
+            cache: Semantic cache checked before running the pipeline, and
+                populated after. Defaults to a new SemanticCache().
         """
         self._model_client = model_client or build_claude_client(model=model)
         self._model = model
         self._metrics_db_path = metrics_db_path
         self._eval_db_path = eval_db_path
+        self._cache = cache or SemanticCache()
         self._planner = build_planner_agent(self._model_client)
         self._responder = build_responder_agent(self._model_client)
 
@@ -78,14 +83,27 @@ class Orchestrator:
     async def ask(self, question: str) -> OrchestratorResult:
         """Answer a user question end-to-end.
 
+        Checks the semantic cache first: a repeated or near-duplicate
+        question short-circuits the full Planner -> Retriever -> Responder
+        pipeline and returns the cached result instead.
+
         Args:
             question: The user's question.
 
         Returns:
             The full pipeline trace: the plan, what was retrieved, and the
-            final answer.
+            final answer. Identical in shape whether served from cache or
+            computed fresh.
         """
         query_id = str(uuid.uuid4())
+
+        start = time.perf_counter()
+        cached = self._cache.get(question)
+        if cached is not None:
+            result = OrchestratorResult.model_validate_json(cached)
+            self._record_step(query_id, "cache_hit", start, usage=None)
+            self._log_query_sample(query_id, question, result.answer, result.retrieval)
+            return result
 
         start = time.perf_counter()
         plan, planner_usage = await run_planner(self._planner, question)
@@ -99,9 +117,12 @@ class Orchestrator:
         answer, responder_usage = await run_responder(self._responder, question, retrieval)
         self._record_step(query_id, "responder", start, responder_usage)
 
+        result = OrchestratorResult(question=question, plan=plan, retrieval=retrieval, answer=answer)
+        self._cache.set(question, result.model_dump_json())
+
         self._log_query_sample(query_id, question, answer, retrieval)
 
-        return OrchestratorResult(question=question, plan=plan, retrieval=retrieval, answer=answer)
+        return result
 
     def _record_step(
         self, query_id: str, step: str, start_time: float, usage: RequestUsage | None
