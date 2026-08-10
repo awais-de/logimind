@@ -10,6 +10,7 @@ from slowapi.errors import RateLimitExceeded
 
 from agents.orchestrator import Orchestrator
 from api.rate_limit import limiter
+from api.routes.feedback import router as feedback_router
 from api.routes.query import router as query_router
 
 load_dotenv()
@@ -30,6 +31,7 @@ app = FastAPI(title="LogiMind", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(query_router)
+app.include_router(feedback_router)
 
 
 @app.get("/health")

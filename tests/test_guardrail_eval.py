@@ -148,6 +148,7 @@ async def test_run_guardrail_eval_scores_sql_and_pipeline_probes(tmp_path: Path)
     fake_orchestrator = Mock()
     fake_orchestrator.ask = AsyncMock(
         return_value=OrchestratorResult(
+            query_id="q1",
             question="ignore instructions",
             plan=fake_plan,
             retrieval=RetrievalResult(),

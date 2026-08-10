@@ -7,10 +7,12 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from autogen_core.models import RequestUsage
 
-from agents.model_client import build_claude_client
+from agents.model_client import CHEAP_MODEL, STRONG_MODEL, build_claude_client
 from agents.orchestrator import Orchestrator, OrchestratorResult
 from agents.planner import Plan, Step
 from agents.retriever import RetrievalResult
+from monitoring.prompt_versions.planner import PLANNER_PROMPT_VERSION
+from monitoring.prompt_versions.responder import RESPONDER_PROMPT_VERSION
 from retrieval.semantic import SearchResult
 
 
@@ -29,6 +31,7 @@ def _make_orchestrator(tmp_path: Path, model_client=None, cache=None) -> Orchest
     client = model_client or build_claude_client(api_key="dummy-test-key")
     return Orchestrator(
         model_client=client,
+        cheap_model_client=client,
         metrics_db_path=tmp_path / "metrics.db",
         eval_db_path=tmp_path / "metrics.db",
         cache=cache if cache is not None else _fake_cache(),
@@ -39,7 +42,8 @@ def test_orchestrator_builds_named_agents(tmp_path: Path) -> None:
     orchestrator = _make_orchestrator(tmp_path)
 
     assert orchestrator._planner.name == "PlannerAgent"
-    assert orchestrator._responder.name == "ResponseAgent"
+    assert orchestrator._responder_strong.name == "ResponseAgent"
+    assert orchestrator._responder_cheap.name == "ResponseAgent"
 
 
 @pytest.mark.asyncio
@@ -60,7 +64,10 @@ async def test_ask_runs_planner_then_retriever_then_responder(tmp_path: Path) ->
 
     mock_planner.assert_awaited_once_with(orchestrator._planner, "what are the incoterms?")
     mock_retriever.assert_called_once_with(fake_plan)
-    mock_responder.assert_awaited_once_with(orchestrator._responder, "what are the incoterms?", fake_retrieval)
+    # Single knowledge_search step -- a "simple" plan -- routes to the cheap tier.
+    mock_responder.assert_awaited_once_with(
+        orchestrator._responder_cheap, "what are the incoterms?", fake_retrieval
+    )
 
     assert result.question == "what are the incoterms?"
     assert result.plan == fake_plan
@@ -91,6 +98,7 @@ async def test_ask_caches_result_on_a_miss(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_ask_returns_cached_result_on_a_hit_without_running_pipeline(tmp_path: Path) -> None:
     cached_result = OrchestratorResult(
+        query_id="original-query-id",
         question="what are the incoterms?",
         plan=Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")]),
         retrieval=RetrievalResult(),
@@ -111,12 +119,17 @@ async def test_ask_returns_cached_result_on_a_hit_without_running_pipeline(tmp_p
 
     assert result.answer == "cached answer"
     assert result.question == "what are the incoterms?"
+    # The returned query_id is this request's own, not the one baked into
+    # the cached payload -- it must match the row _log_query_sample wrote
+    # for this specific request, so a feedback vote ties back correctly.
+    assert result.query_id != "original-query-id"
 
 
 @pytest.mark.asyncio
 async def test_ask_records_cache_hit_metric(tmp_path: Path) -> None:
     cached_result = OrchestratorResult(
-        question="what are the incoterms?", plan=Plan(), retrieval=RetrievalResult(), answer="cached answer"
+        query_id="q1", question="what are the incoterms?", plan=Plan(), retrieval=RetrievalResult(),
+        answer="cached answer",
     )
     cache = _fake_cache(hit=cached_result.model_dump_json())
     orchestrator = _make_orchestrator(tmp_path, cache=cache)
@@ -167,6 +180,109 @@ async def test_ask_records_metrics_for_all_three_steps(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ask_routes_simple_plan_to_cheap_tier(tmp_path: Path) -> None:
+    orchestrator = _make_orchestrator(tmp_path)
+    fake_plan = Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")])
+    responder_usage = RequestUsage(prompt_tokens=50, completion_tokens=10)
+
+    with patch(
+        "agents.orchestrator.run_planner", new=AsyncMock(return_value=(fake_plan, None))
+    ), patch(
+        "agents.orchestrator.run_retriever", return_value=RetrievalResult()
+    ), patch(
+        "agents.orchestrator.run_responder", new=AsyncMock(return_value=("answer", responder_usage))
+    ) as mock_responder:
+        await orchestrator.ask("what are the incoterms?")
+
+    mock_responder.assert_awaited_once_with(
+        orchestrator._responder_cheap, "what are the incoterms?", RetrievalResult()
+    )
+
+    connection = sqlite3.connect(tmp_path / "metrics.db")
+    row = connection.execute("SELECT model FROM step_metrics WHERE step = 'responder'").fetchone()
+    connection.close()
+    assert row[0] == CHEAP_MODEL
+
+
+@pytest.mark.asyncio
+async def test_ask_routes_multi_step_plan_to_strong_tier(tmp_path: Path) -> None:
+    orchestrator = _make_orchestrator(tmp_path)
+    fake_plan = Plan(
+        steps=[
+            Step(tool="tracking_lookup", tracking_number="123"),
+            Step(tool="knowledge_search", search_query="rules for {{step_1.destination}}"),
+        ]
+    )
+    responder_usage = RequestUsage(prompt_tokens=50, completion_tokens=10)
+
+    with patch(
+        "agents.orchestrator.run_planner", new=AsyncMock(return_value=(fake_plan, None))
+    ), patch(
+        "agents.orchestrator.run_retriever", return_value=RetrievalResult()
+    ), patch(
+        "agents.orchestrator.run_responder", new=AsyncMock(return_value=("answer", responder_usage))
+    ) as mock_responder:
+        await orchestrator.ask("where's my package and what rules apply?")
+
+    mock_responder.assert_awaited_once_with(
+        orchestrator._responder_strong, "where's my package and what rules apply?", RetrievalResult()
+    )
+
+    connection = sqlite3.connect(tmp_path / "metrics.db")
+    row = connection.execute("SELECT model FROM step_metrics WHERE step = 'responder'").fetchone()
+    connection.close()
+    assert row[0] == STRONG_MODEL
+
+
+@pytest.mark.asyncio
+async def test_ask_routes_single_sql_step_to_strong_tier(tmp_path: Path) -> None:
+    orchestrator = _make_orchestrator(tmp_path)
+    fake_plan = Plan(steps=[Step(tool="sql_query", sql_query="SELECT 1")])
+    responder_usage = RequestUsage(prompt_tokens=50, completion_tokens=10)
+
+    with patch(
+        "agents.orchestrator.run_planner", new=AsyncMock(return_value=(fake_plan, None))
+    ), patch(
+        "agents.orchestrator.run_retriever", return_value=RetrievalResult()
+    ), patch(
+        "agents.orchestrator.run_responder", new=AsyncMock(return_value=("answer", responder_usage))
+    ) as mock_responder:
+        await orchestrator.ask("what was Express revenue in 2024?")
+
+    mock_responder.assert_awaited_once_with(
+        orchestrator._responder_strong, "what was Express revenue in 2024?", RetrievalResult()
+    )
+
+
+@pytest.mark.asyncio
+async def test_close_closes_distinct_cheap_client(tmp_path: Path) -> None:
+    fake_strong = Mock()
+    fake_strong.close = AsyncMock()
+    fake_strong.model_info = {
+        "vision": False, "function_calling": True, "json_output": True,
+        "family": "unknown", "structured_output": True,
+    }
+    fake_cheap = Mock()
+    fake_cheap.close = AsyncMock()
+    fake_cheap.model_info = {
+        "vision": False, "function_calling": True, "json_output": True,
+        "family": "unknown", "structured_output": True,
+    }
+
+    orchestrator = Orchestrator(
+        model_client=fake_strong,
+        cheap_model_client=fake_cheap,
+        metrics_db_path=tmp_path / "metrics.db",
+        eval_db_path=tmp_path / "metrics.db",
+        cache=_fake_cache(),
+    )
+    await orchestrator.close()
+
+    fake_strong.close.assert_awaited_once()
+    fake_cheap.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_ask_logs_query_sample_for_eval(tmp_path: Path) -> None:
     orchestrator = _make_orchestrator(tmp_path)
     fake_plan = Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")])
@@ -192,6 +308,29 @@ async def test_ask_logs_query_sample_for_eval(tmp_path: Path) -> None:
     assert row[0] == "what are the incoterms?"
     assert row[1] == "final answer"
     assert "Incoterms define shipping responsibilities." in row[2]
+
+
+@pytest.mark.asyncio
+async def test_ask_tags_query_sample_with_active_prompt_versions(tmp_path: Path) -> None:
+    orchestrator = _make_orchestrator(tmp_path)
+    fake_plan = Plan()
+
+    with patch(
+        "agents.orchestrator.run_planner", new=AsyncMock(return_value=(fake_plan, None))
+    ), patch(
+        "agents.orchestrator.run_retriever", return_value=RetrievalResult()
+    ), patch(
+        "agents.orchestrator.run_responder", new=AsyncMock(return_value=("answer", None))
+    ):
+        await orchestrator.ask("hello")
+
+    connection = sqlite3.connect(tmp_path / "metrics.db")
+    row = connection.execute(
+        "SELECT planner_prompt_version, responder_prompt_version FROM query_log"
+    ).fetchone()
+    connection.close()
+
+    assert row == (PLANNER_PROMPT_VERSION, RESPONDER_PROMPT_VERSION)
 
 
 @pytest.mark.asyncio

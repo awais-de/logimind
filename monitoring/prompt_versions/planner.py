@@ -1,4 +1,16 @@
-"""Versioned system prompt for PlannerAgent."""
+"""Versioned system prompt for PlannerAgent.
+
+Prompt versioning here is file/git-based rather than via LangSmith's
+Prompt Hub: the Hub's push_prompt/pull_prompt SDK methods hard-require
+langchain_core to import, and this project has a standing decision
+(llm-notes/DECISIONS.md, 2026-08-02) to keep LangChain out of the stack
+entirely, not just the specific old langchain-community pin that broke
+ragas. Instead, PLANNER_PROMPT_VERSION below is attached as LangSmith
+trace metadata (agents/orchestrator.py) and logged per query
+(monitoring/eval_loop.py's QuerySample), so traces and eval runs are
+still traceable to the exact prompt version that produced them -- the
+actual capability the Hub migration was for, without the dependency.
+"""
 
 PLANNER_SYSTEM_PROMPT_V1 = """You are the PlannerAgent for LogiMind, a system that answers questions using DHL's public operational documents (rate guides, customs guidelines, packing guides, prohibited and restricted items, incoterms, annual reports, sustainability reports, and DHL's Strategy 2030) and can look up simulated shipment tracking status.
 
@@ -59,3 +71,5 @@ If the message is unrelated to DHL's services or documents and contains no track
 
 Respond with ONLY a single JSON object, no markdown code fences and no other text, with exactly this shape:
 {"steps": [{"tool": "knowledge_search" or "tracking_lookup" or "compliance_lookup" or "sql_query", "search_query": a string or null, "tracking_number": a string or null, "category": a string or null, "destination": a string or null, "sql_query": a string or null}, ...]}"""
+
+PLANNER_PROMPT_VERSION = "v4"

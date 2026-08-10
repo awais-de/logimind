@@ -151,5 +151,90 @@ def test_store_chunks_writes_to_both_backends() -> None:
     ) as mock_sqlite:
         store_chunks(embedded)
 
-    mock_qdrant.assert_called_once_with(embedded)
-    mock_sqlite.assert_called_once_with(embedded)
+    mock_qdrant.assert_called_once()
+    mock_sqlite.assert_called_once()
+    assert mock_qdrant.call_args.args[0] == embedded
+    assert mock_sqlite.call_args.args[0] == embedded
+
+
+def test_store_chunks_stamps_both_backends_with_the_same_run() -> None:
+    embedded = [_embedded_chunk("c1")]
+
+    with patch("data.ingestion.store.write_to_qdrant") as mock_qdrant, patch(
+        "data.ingestion.store.write_to_sqlite"
+    ) as mock_sqlite:
+        store_chunks(embedded)
+
+    qdrant_run = mock_qdrant.call_args.kwargs["run"]
+    sqlite_run = mock_sqlite.call_args.kwargs["run"]
+    assert qdrant_run.run_id == sqlite_run.run_id
+    assert qdrant_run.ingested_at == sqlite_run.ingested_at
+
+
+def test_write_to_sqlite_stamps_run_id_and_ingested_at(tmp_path: Path) -> None:
+    from data.ingestion.lineage import RunInfo
+
+    db_path = tmp_path / "metadata.db"
+    run = RunInfo.new()
+
+    write_to_sqlite([_embedded_chunk("c1")], db_path=db_path, run=run)
+
+    connection = sqlite3.connect(db_path)
+    row = connection.execute("SELECT run_id, ingested_at FROM chunks WHERE chunk_id = 'c1'").fetchone()
+    connection.close()
+
+    assert row == (run.run_id, run.ingested_at.isoformat())
+
+
+def test_write_to_sqlite_returns_zero_for_unchanged_rerun(tmp_path: Path) -> None:
+    db_path = tmp_path / "metadata.db"
+    embedded = [_embedded_chunk("c1"), _embedded_chunk("c2")]
+
+    first_written = write_to_sqlite(embedded, db_path=db_path)
+    second_written = write_to_sqlite(embedded, db_path=db_path)
+
+    assert first_written == 2
+    assert second_written == 0
+
+
+def test_write_to_sqlite_rewrites_only_changed_chunks(tmp_path: Path) -> None:
+    db_path = tmp_path / "metadata.db"
+    write_to_sqlite([_embedded_chunk("c1"), _embedded_chunk("c2")], db_path=db_path)
+
+    changed_chunk = Chunk(chunk_id="c1", page_number=1, text="new text for c1", **SOURCE_KWARGS)
+    updated = [EmbeddedChunk(chunk=changed_chunk, embedding=[0.1, 0.2, 0.3]), _embedded_chunk("c2")]
+
+    written = write_to_sqlite(updated, db_path=db_path)
+
+    assert written == 1
+
+    connection = sqlite3.connect(db_path)
+    text = connection.execute("SELECT text FROM chunks WHERE chunk_id = 'c1'").fetchone()[0]
+    connection.close()
+    assert text == "new text for c1"
+
+
+def test_write_to_sqlite_migrates_pre_lineage_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "metadata.db"
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """
+        CREATE TABLE chunks (
+            chunk_id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, doc_name TEXT NOT NULL,
+            category TEXT NOT NULL, region TEXT, publication_date TEXT,
+            page_number INTEGER NOT NULL, text TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO chunks VALUES ('old-chunk', 'd1', 'Doc', 'cat', NULL, NULL, 1, 'old text')"
+    )
+    connection.commit()
+    connection.close()
+
+    write_to_sqlite([_embedded_chunk("c1")], db_path=db_path)
+
+    connection = sqlite3.connect(db_path)
+    rows = connection.execute("SELECT chunk_id FROM chunks ORDER BY chunk_id").fetchall()
+    connection.close()
+    assert rows == [("c1",), ("old-chunk",)]

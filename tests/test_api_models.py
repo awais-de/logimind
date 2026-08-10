@@ -35,11 +35,13 @@ def test_query_response_from_orchestrator_result_with_search_results() -> None:
     plan = Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")])
     retrieval = RetrievalResult(search_results=[_result("c1", "x" * 300, 0.87)])
     orchestrator_result = OrchestratorResult(
-        question="what are the incoterms?", plan=plan, retrieval=retrieval, answer="Here is the answer."
+        query_id="q1", question="what are the incoterms?", plan=plan, retrieval=retrieval,
+        answer="Here is the answer.",
     )
 
     response = QueryResponse.from_orchestrator_result(orchestrator_result)
 
+    assert response.query_id == "q1"
     assert response.answer == "Here is the answer."
     assert response.needs_knowledge_search is True
     assert response.needs_tracking_lookup is False
@@ -56,7 +58,8 @@ def test_query_response_from_orchestrator_result_with_tracking_info() -> None:
     plan = Plan(steps=[Step(tool="tracking_lookup", tracking_number="123")])
     retrieval = RetrievalResult(tracking_info={"status": "Delivered"})
     orchestrator_result = OrchestratorResult(
-        question="where is my package?", plan=plan, retrieval=retrieval, answer="It was delivered."
+        query_id="q2", question="where is my package?", plan=plan, retrieval=retrieval,
+        answer="It was delivered.",
     )
 
     response = QueryResponse.from_orchestrator_result(orchestrator_result)

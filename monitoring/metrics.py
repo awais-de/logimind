@@ -15,6 +15,7 @@ METRICS_DB_PATH = Path(__file__).resolve().parents[1] / "monitoring" / "metrics.
 # active through 2026-08-31; reverts to the standard $3.00/$15.00 after.
 MODEL_PRICING_PER_MILLION = {
     "claude-sonnet-5": {"input": 2.00, "output": 10.00},
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
 }
 
 

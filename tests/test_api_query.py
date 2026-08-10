@@ -15,6 +15,7 @@ from api.main import app
 async def test_query_endpoint_returns_answer_with_citations() -> None:
     fake_orchestrator = AsyncMock()
     fake_orchestrator.ask.return_value = OrchestratorResult(
+        query_id="q1",
         question="what are the incoterms?",
         plan=Plan(steps=[Step(tool="knowledge_search", search_query="incoterms")]),
         retrieval=RetrievalResult(),
@@ -30,6 +31,7 @@ async def test_query_endpoint_returns_answer_with_citations() -> None:
     body = response.json()
     assert body["answer"] == "Incoterms define buyer/seller responsibilities."
     assert body["needs_knowledge_search"] is True
+    assert body["query_id"] == "q1"
     fake_orchestrator.ask.assert_awaited_once_with("what are the incoterms?")
 
 

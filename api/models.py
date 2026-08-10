@@ -1,8 +1,9 @@
-"""Pydantic request/response models for the /query API endpoint."""
+"""Pydantic request/response models for the /query and /feedback endpoints."""
 
 from pydantic import BaseModel, Field
 
 from agents.orchestrator import OrchestratorResult
+from monitoring.feedback import Vote
 
 SNIPPET_LENGTH = 200
 MAX_QUESTION_LENGTH = 500
@@ -39,6 +40,8 @@ class QueryResponse(BaseModel):
     """The API's response to a /query request.
 
     Attributes:
+        query_id: Identifies this specific request -- pass it back to
+            POST /feedback to vote on the answer.
         answer: The synthesized answer, with inline citations.
         citations: Source documents/pages the answer draws from.
         needs_knowledge_search: Whether the query triggered a knowledge
@@ -48,6 +51,7 @@ class QueryResponse(BaseModel):
         tracking_info: Mock tracking status, if a tracking lookup was made.
     """
 
+    query_id: str
     answer: str
     citations: list[Citation]
     needs_knowledge_search: bool
@@ -75,9 +79,22 @@ class QueryResponse(BaseModel):
             for r in result.retrieval.search_results
         ]
         return cls(
+            query_id=result.query_id,
             answer=result.answer,
             citations=citations,
             needs_knowledge_search=any(s.tool == "knowledge_search" for s in result.plan.steps),
             needs_tracking_lookup=any(s.tool == "tracking_lookup" for s in result.plan.steps),
             tracking_info=result.retrieval.tracking_info,
         )
+
+
+class FeedbackRequest(BaseModel):
+    """A thumbs up/down vote on a /query response.
+
+    Attributes:
+        query_id: The query_id from the QueryResponse being voted on.
+        vote: "up" or "down".
+    """
+
+    query_id: str
+    vote: Vote

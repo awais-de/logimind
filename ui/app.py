@@ -43,6 +43,42 @@ def _render_trace(data: dict) -> None:
                 st.caption(citation["text_snippet"])
 
 
+def _submit_feedback(query_id: str, vote: str) -> bool:
+    """POST a thumbs up/down vote to the API. Returns True on success."""
+    try:
+        response = httpx.post(
+            f"{API_BASE_URL}/feedback", json={"query_id": query_id, "vote": vote}, timeout=5.0
+        )
+        response.raise_for_status()
+        return True
+    except httpx.HTTPError:
+        return False
+
+
+def _render_feedback(query_id: str | None) -> None:
+    """Render thumbs up/down controls for one answer, once per query_id."""
+    if not query_id:
+        return
+
+    if "feedback_given" not in st.session_state:
+        st.session_state.feedback_given = {}
+
+    given = st.session_state.feedback_given.get(query_id)
+    if given:
+        st.caption(f"Thanks for the feedback ({'👍' if given == 'up' else '👎'})")
+        return
+
+    up_col, down_col, _ = st.columns([1, 1, 8])
+    if up_col.button("👍", key=f"feedback-up-{query_id}"):
+        if _submit_feedback(query_id, "up"):
+            st.session_state.feedback_given[query_id] = "up"
+            st.rerun()
+    if down_col.button("👎", key=f"feedback-down-{query_id}"):
+        if _submit_feedback(query_id, "down"):
+            st.session_state.feedback_given[query_id] = "down"
+            st.rerun()
+
+
 st.set_page_config(page_title="LogiMind", page_icon=":package:")
 
 with st.sidebar:
@@ -67,6 +103,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
         if message.get("trace"):
             _render_trace(message["trace"])
+            _render_feedback(message["trace"].get("query_id"))
 
 question = st.chat_input("Ask a question...")
 if question:
@@ -89,6 +126,7 @@ if question:
         if data is not None:
             st.markdown(data["answer"])
             _render_trace(data)
+            _render_feedback(data.get("query_id"))
             st.session_state.messages.append(
                 {"role": "assistant", "content": data["answer"], "trace": data}
             )

@@ -66,6 +66,12 @@ class QuerySample(BaseModel):
         answer: The final answer ResponseAgent produced.
         context: Text of the retrieved chunks the answer was grounded in.
             Empty if the plan didn't call for a knowledge search.
+        planner_prompt_version: monitoring/prompt_versions/planner.py's
+            PLANNER_PROMPT_VERSION active when this query ran, so an eval
+            score can be traced back to the exact prompt that produced it.
+        responder_prompt_version: Same, for
+            monitoring/prompt_versions/responder.py's
+            RESPONDER_PROMPT_VERSION.
         timestamp: When the query was logged.
     """
 
@@ -73,6 +79,8 @@ class QuerySample(BaseModel):
     question: str
     answer: str
     context: list[str] = []
+    planner_prompt_version: str | None = None
+    responder_prompt_version: str | None = None
     timestamp: datetime
 
 
@@ -107,10 +115,20 @@ def _init_db(db_path: Path) -> None:
                 question TEXT NOT NULL,
                 answer TEXT NOT NULL,
                 context TEXT NOT NULL,
+                planner_prompt_version TEXT,
+                responder_prompt_version TEXT,
                 timestamp TEXT NOT NULL
             )
             """
         )
+        # A query_log table created before prompt-version tagging existed
+        # won't have these columns yet; add them without losing existing
+        # rows. Harmless no-op (duplicate column) on a fresh table.
+        for column in ("planner_prompt_version", "responder_prompt_version"):
+            try:
+                connection.execute(f"ALTER TABLE query_log ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError:
+                pass
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS eval_results (
@@ -138,14 +156,18 @@ def log_query_sample(sample: QuerySample, db_path: Path = EVAL_DB_PATH) -> None:
     try:
         connection.execute(
             """
-            INSERT OR REPLACE INTO query_log (query_id, question, answer, context, timestamp)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO query_log
+                (query_id, question, answer, context, planner_prompt_version,
+                 responder_prompt_version, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 sample.query_id,
                 sample.question,
                 sample.answer,
                 json.dumps(sample.context),
+                sample.planner_prompt_version,
+                sample.responder_prompt_version,
                 sample.timestamp.isoformat(),
             ),
         )
@@ -160,7 +182,8 @@ def _unevaluated_samples(db_path: Path, limit: int) -> list[QuerySample]:
     try:
         rows = connection.execute(
             """
-            SELECT ql.query_id, ql.question, ql.answer, ql.context, ql.timestamp
+            SELECT ql.query_id, ql.question, ql.answer, ql.context,
+                   ql.planner_prompt_version, ql.responder_prompt_version, ql.timestamp
             FROM query_log ql
             LEFT JOIN eval_results er ON ql.query_id = er.query_id
             WHERE er.query_id IS NULL
@@ -178,7 +201,9 @@ def _unevaluated_samples(db_path: Path, limit: int) -> list[QuerySample]:
             question=row[1],
             answer=row[2],
             context=json.loads(row[3]),
-            timestamp=datetime.fromisoformat(row[4]),
+            planner_prompt_version=row[4],
+            responder_prompt_version=row[5],
+            timestamp=datetime.fromisoformat(row[6]),
         )
         for row in rows
     ]

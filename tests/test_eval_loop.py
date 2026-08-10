@@ -150,6 +150,89 @@ def test_log_and_record_round_trip(tmp_path: Path) -> None:
     assert json.loads(row[3]) == ["context a", "context b"]
 
 
+def test_log_query_sample_stores_prompt_versions(tmp_path: Path) -> None:
+    db_path = tmp_path / "metrics.db"
+    sample = QuerySample(
+        query_id="q1",
+        question="what are the incoterms?",
+        answer="answer text",
+        planner_prompt_version="v4",
+        responder_prompt_version="v3",
+        timestamp=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+
+    log_query_sample(sample, db_path=db_path)
+
+    connection = sqlite3.connect(db_path)
+    row = connection.execute(
+        "SELECT planner_prompt_version, responder_prompt_version FROM query_log"
+    ).fetchone()
+    connection.close()
+
+    assert row == ("v4", "v3")
+
+
+def test_unevaluated_samples_round_trips_prompt_versions(tmp_path: Path) -> None:
+    db_path = tmp_path / "metrics.db"
+    log_query_sample(
+        QuerySample(
+            query_id="q1", question="q", answer="a",
+            planner_prompt_version="v4", responder_prompt_version="v3",
+            timestamp=datetime(2026, 8, 2, tzinfo=timezone.utc),
+        ),
+        db_path=db_path,
+    )
+
+    client = Mock()
+    client.chat.completions.create.side_effect = [
+        _judge_response({"claims": []}),
+        _judge_response({"questions": ["q1"]}),
+    ]
+    client.embeddings.create.return_value = _embedding_response([[1.0, 0.0], [1.0, 0.0]])
+
+    results = run_eval_loop(sample_size=10, client=client, db_path=db_path)
+
+    assert len(results) == 1
+
+
+def test_init_db_migrates_pre_prompt_version_query_log_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "metrics.db"
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """
+        CREATE TABLE query_log (
+            query_id TEXT PRIMARY KEY,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            context TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO query_log VALUES ('old-q', 'old question', 'old answer', '[]', '2026-08-02T00:00:00+00:00')"
+    )
+    connection.commit()
+    connection.close()
+
+    log_query_sample(
+        QuerySample(
+            query_id="new-q", question="new question", answer="new answer",
+            planner_prompt_version="v4", responder_prompt_version="v3",
+            timestamp=datetime(2026, 8, 2, tzinfo=timezone.utc),
+        ),
+        db_path=db_path,
+    )
+
+    connection = sqlite3.connect(db_path)
+    rows = connection.execute(
+        "SELECT query_id, planner_prompt_version FROM query_log ORDER BY query_id"
+    ).fetchall()
+    connection.close()
+
+    assert rows == [("new-q", "v4"), ("old-q", None)]
+
+
 def test_run_eval_loop_scores_only_unevaluated_samples(tmp_path: Path) -> None:
     db_path = tmp_path / "metrics.db"
     log_query_sample(
