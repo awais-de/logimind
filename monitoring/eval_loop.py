@@ -215,7 +215,25 @@ def record_eval_result(result: EvalResult, db_path: Path = EVAL_DB_PATH) -> None
     )
 
 
-def _call_judge_json(client: OpenAI, prompt: str) -> dict:
+def call_judge_json(client: OpenAI, prompt: str) -> dict:
+    """Call the judge model with a prompt expecting a JSON object reply.
+
+    Shared by any module scoring something via an LLM judge (this module's
+    faithfulness/relevancy scoring, and monitoring/guardrail_eval.py's
+    adversarial probe scoring) so the retry/backoff and JSON-extraction
+    logic isn't duplicated.
+
+    Args:
+        client: OpenAI client to call.
+        prompt: Prompt instructing the model to reply with a JSON object.
+
+    Returns:
+        The parsed JSON object from the model's response.
+
+    Raises:
+        ValueError: The response contained no JSON object.
+        openai.APIError: The call failed after all retries.
+    """
     last_error: APIError | None = None
     for attempt in range(MAX_RETRIES):
         try:
@@ -271,7 +289,7 @@ def score_faithfulness(
     prompt = FAITHFULNESS_PROMPT.format(
         question=question, context="\n\n".join(context), answer=answer
     )
-    parsed = _call_judge_json(client, prompt)
+    parsed = call_judge_json(client, prompt)
     claims = parsed.get("claims", [])
     if not claims:
         return None
@@ -299,7 +317,7 @@ def score_answer_relevancy(question: str, answer: str, client: OpenAI) -> float 
         return None
 
     prompt = RELEVANCY_PROMPT.format(answer=answer)
-    parsed = _call_judge_json(client, prompt)
+    parsed = call_judge_json(client, prompt)
     generated_questions = parsed.get("questions", [])
     if not generated_questions:
         return None
