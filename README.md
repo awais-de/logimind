@@ -72,22 +72,23 @@ Two separate Docker images rather than one: the API image carries the full ML st
 
 ## Performance
 
-Measured on 13 real queries run through the full pipeline (same Claude/Qdrant/OpenAI backends the deployment uses) on 2026-08-02, spanning every document category, a tracking lookup, a combined tracking+knowledge query, and an out-of-scope refusal:
+Measured on 9 real queries run through the full current pipeline (same Claude/Qdrant/OpenAI backends the deployment uses) on 2026-08-10, after the multi-step planner, the compliance/SQL tools, and model routing — 6 single-step questions (document lookups, a tracking lookup, a compliance check, an out-of-scope refusal) and 3 compound ones (a tracking+compliance combination and two SQL-involving questions, one of them combined with a document lookup):
 
-| Step | Avg latency | Avg cost |
-|---|---|---|
-| PlannerAgent (Claude) | 1.9s | $0.0024 |
-| RetrieverAgent (deterministic) | 1.2s | — |
-| ResponseAgent (Claude) | 6.3s | $0.0255 |
-| **Total per query** | **~9.4s** | **~$0.028** |
+| Step | Model | Avg latency | Avg cost |
+|---|---|---|---|
+| PlannerAgent | Claude Sonnet 5 (always) | 3.3s | $0.0041 |
+| RetrieverAgent | deterministic | 1.6s | — |
+| ResponseAgent — simple tier | Claude Haiku 4.5 | 2.2s | $0.0037 |
+| ResponseAgent — complex tier | Claude Sonnet 5 | 4.2s | $0.0051 |
+| **Total per query (blended)** | | **~7.8s** | **~$0.0082** |
+
+The routing split is real and measurable, not just theoretically different pricing: the cheap tier is both faster and cheaper per call, and complex (multi-step or SQL-involving) queries correctly cost more — that's the tradeoff the routing is meant to make deliberately, rather than paying the strong-tier price on every request.
 
 Answer quality, scored by the eval loop described above:
-- Faithfulness (answer claims checked against retrieved context): **0.98 average** across the 11 queries where the answer made checkable claims. The other 2 were correct refusals with no context to check against — one genuinely out-of-scope, one where retrieval found nothing relevant — so faithfulness is undefined for those rather than scored as low.
-- Answer relevancy (generated-question similarity to the real question): **0.68 average** across all 13.
+- Faithfulness (answer claims checked against retrieved context): **1.0 average** across the 4 queries with a document-search step to check against. The other 5 (tracking, compliance, SQL, and the out-of-scope refusal) have no document context to check claims against, so faithfulness is undefined for those rather than scored as low — same convention as the original benchmark.
+- Answer relevancy (generated-question similarity to the real question): **0.69 average** across all 9.
 
-n=13 is enough to sanity-check the pipeline's real cost/latency/quality profile, not a statistically rigorous benchmark — it doesn't support claims about tail latency or worst-case behavior.
-
-**Not yet re-measured**: this table predates the multi-step planner, the compliance/SQL tools, and the semantic cache. A single-tool question still follows the same path measured above, so these numbers should still roughly hold for that case, but nothing here reflects a real compound (multi-step) query's latency/cost, the new tools, or the cache's actual hit-rate savings in production. Re-running this benchmark against the current pipeline is still open — deliberately not done as a side effect of a README update, since it costs real API spend.
+n=9 is a sanity check on the current pipeline's real cost/latency/quality profile, not a statistically rigorous benchmark — same caveat as before, now smaller and cheaper to run since a mixed sample only needs to cover each routing path once or twice, not resample every document category.
 
 ## Stack
 
@@ -109,7 +110,7 @@ Or with Docker: `docker compose up --build`.
 
 ## Testing
 
-`pytest` — 181 tests, all external calls mocked so the suite runs without hitting real APIs.
+`pytest` — 216 tests, all external calls mocked so the suite runs without hitting real APIs.
 
 ## Status
 
@@ -121,5 +122,10 @@ Beyond the initial build:
 - Adversarial evaluation harness covering prompt injection, system-prompt extraction, out-of-scope questions, and SQL-injection attempts.
 - Retrieval-only evaluation (context precision/recall) against a hand-verified ground-truth set — currently 7 seed cases, not yet the full curated set.
 - A semantic cache in front of the pipeline, short-circuiting repeated or near-duplicate questions.
+- Complexity-based model routing: simple questions run on Claude Haiku 4.5, multi-step or SQL-involving ones on Claude Sonnet 5, decided from PlannerAgent's own plan.
+- Prompt versioning (file/git-based, not a hosted prompt hub — see the note in `monitoring/prompt_versions/planner.py`) tagged onto every LangSmith trace and logged query, so an eval score traces back to the exact prompt version that produced it.
+- User feedback (👍/👎 in the UI) persisted against the query log, for reviewing disputed answers as hard cases.
+- Ingestion lineage: every stored chunk carries a run ID and timestamp, and re-ingesting unchanged source PDFs is a no-op instead of a rewrite.
+- A non-engineering usage playbook (`docs/playbook.md`) alongside this README's architecture detail.
 
-Still open: growing the ground-truth test set beyond its current seed size; re-benchmarking latency/cost/quality against the current (multi-step, multi-tool) pipeline, since the numbers above predate it; prompt versioning via a prompt hub; the real DHL tracking API in place of the simulated one; ingestion lineage tracking; and infrastructure-as-code for deployment.
+Still open: growing the ground-truth test set beyond its current seed size; the real DHL tracking API in place of the simulated one; and infrastructure-as-code for an AWS deployment target alongside Railway.
